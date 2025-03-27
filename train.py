@@ -1,58 +1,38 @@
-import argparse
+import pandas as pd
 import numpy as np
-from model import CNN
-from emnist import extract_training_samples
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import classification_report
+from model import create_and_tune_model
 
-def cross_entropy_loss(predictions, labels):
-    batch_size = predictions.shape[0]
-    epsilon = 1e-8 # to avoid log(0) 
-    return -np.sum(np.log(predictions[np.arange(batch_size), labels] + epsilon)) / batch_size
+print("Loading training data...")
+train_data = pd.read_csv('data/archive/emnist-balanced-train.csv')
+X = train_data.iloc[:, 1:].values
+y = train_data.iloc[:, 0].values
 
-def compute_accuracy(predictions, labels):
-    return np.mean(np.argmax(predictions, axis=1) == labels)
+print("Preprocessing training data...")
+X = X / 255.0
+X = X.reshape(X.shape[0], -1)
 
-def train(model, X_train, y_train, epochs=10, learning_rate=0.05, batch_size=32):
-    num_samples = X_train.shape[0]
-    for epoch in range(epochs):
-        indices = np.random.permutation(num_samples)
-        X_train, y_train = X_train[indices], y_train[indices]
-        
-        for i in range(0, num_samples, batch_size):
-            X_batch = X_train[i:i+batch_size]
-            y_batch = y_train[i:i+batch_size]
-            
-            predictions = model.forward(X_batch)
-            loss = cross_entropy_loss(predictions, y_batch)
-            acc = compute_accuracy(predictions, y_batch)
-            
-            # Backpropagation
-            model.backward(X_batch, y_batch)
-            
-            model.update_weights(learning_rate)
+print("Splitting data into training and validation sets...")
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
+print("Standardizing features...")
+scaler = MinMaxScaler()
+X_train = scaler.fit_transform(X_train)
+X_val = scaler.transform(X_val)
 
-            print(f"Epoch {epoch+1}, Batch {i//batch_size+1}: Loss={loss:.4f}, Accuracy={acc:.4f}")
-            
+print("Creating and tuning the model...")
+mlp = create_and_tune_model(X_train, y_train)
 
-if __name__ == "__main__":
-    # Set up command-line argument parsing
-    parser = argparse.ArgumentParser(description="Train a CNN on the EMNIST dataset.")
-    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate for training')
-    
-    args = parser.parse_args()
+print("Training the MLPClassifier with best parameters...")
+mlp.fit(X_train, y_train)
 
-    # Load training data
-    X_train, y_train = extract_training_samples()
-    X_train = X_train / 255.0  # Normalize pixel values
-    X_train = X_train.reshape(-1, 1, 28, 28)  # Reshape for CNN input
+print("Evaluating the model on validation data...")
+y_pred = mlp.predict(X_val)
+print(classification_report(y_val, y_pred))
 
-    # Define the model configuration
-    conv_config = [(8, 3), (16, 3)]  # Two convolutional layers
-    fc_sizes = [128]  # One hidden FC layer
-    model = CNN(input_shape=(1, 28, 28), conv_config=conv_config, fc_sizes=fc_sizes, num_classes=47)
-
-    # Train the model with parameters from the command line
-    train(model, X_train, y_train, epochs=args.epochs, learning_rate=args.learning_rate, batch_size=args.batch_size)
-
+print("Saving the trained model and scaler...")
+import joblib
+joblib.dump(mlp, 'trained_model.pkl')
+joblib.dump(scaler, 'scaler.pkl')
