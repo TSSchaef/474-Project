@@ -11,7 +11,7 @@ def cross_entropy_loss(predictions, labels):
 def compute_accuracy(predictions, labels):
     return np.mean(np.argmax(predictions, axis=1) == labels)
 
-def train(model, X_train, y_train, epochs=10, learning_rate=0.001, batch_size=32):
+def train(model, X_train, y_train, epochs=10, learning_rate=0.05, batch_size=32):
     num_samples = X_train.shape[0]
     for epoch in range(epochs):
         indices = np.random.permutation(num_samples)

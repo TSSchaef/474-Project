@@ -43,25 +43,42 @@ class ConvLayer:
 
         # Adding biases
         self.output += self.biases.reshape(1, -1, 1, 1)
+        print("Filter Norm: ", np.linalg.norm(self.filters))
 
         return self.output
 
     def backward(self, d_out):
         batch_size, out_channels, height, width= d_out.shape
+        _, _, input_height, input_width = self.input.shape
 
         # Calculate gradients for filters and biases
         d_filters = np.zeros_like(self.filters)
         d_biases = np.zeros_like(self.biases)
         d_input = np.zeros_like(self.input)
 
+        if self.padding > 0:
+            padded_input = np.pad(self.input, ((0,0), (0,0),
+                                               (self.padding, self.padding), (self.padding, self.padding)), mode='constant')
+            d_padded_input = np.zeros_like(padded_input)
+        else:
+            padded_input = self.input
+            d_padded_input = d_input
+
+
         # Calculate gradients
         for i in range(self.out_channels):
             for j in range(self.in_channels):
                 for b in range(batch_size):
-                    d_filters[i, j, :, :] += correlate2d(self.input[b, j, :, :], d_out[b, i, :, :], mode='valid')
+                    d_filters[i, j, :, :] += correlate2d(padded_input[b, j, :, :], d_out[b, i, :, :], mode='valid')
+                    d_padded_input[b, j, :, :] += correlate2d(d_out[b, i, :, :], np.flip(self.filters[i, j, :, :]), mode='full')
+
             d_biases[i] += np.sum(d_out[:, i, :, :])
 
-
+        if self.padding > 0:
+            d_input = d_padded_input[:, :, self.padding:-self.padding, self.padding:-self.padding]
+        else:
+            d_input = d_padded_input
+        
         self.d_filters = d_filters
         self.d_biases = d_biases
         return d_input
@@ -75,6 +92,7 @@ class ConvLayer:
         # Update weights and biases using gradients
         self.filters -= learning_rate * self.d_filters
         self.biases -= learning_rate * self.d_biases
+
 
 class ReLU:
     def __init__(self):
@@ -146,12 +164,8 @@ class Softmax:
         return probabilities
 
     def backward(self, d_out):
-        # Compute the gradient of the loss w.r.t softmax input
-        batch_size = d_out.shape[0]
-        d_input = self.output.copy()
-        d_input[np.arange(batch_size), np.argmax(self.output, axis=1)] -= 1
-        d_input /= batch_size
-        return d_input
+        grad = self.output - d_out
+        return grad
 
 class CNN:
     def __init__(self, input_shape, conv_config, fc_sizes, num_classes):
@@ -193,12 +207,13 @@ class CNN:
         # Perform backward pass through each layer (from last to first)
         d_out = self.compute_loss_gradients(X_batch, y_batch)
         for layer in reversed(self.layers):
+            print(f"Gradient Norm Before {layer.__class__.__name__}:", np.linalg.norm(d_out))
             d_out = layer.backward(d_out)
 
     def compute_loss_gradients(self, X_batch, y_batch):
         # Compute gradient of loss w.r.t softmax output
         batch_size = X_batch.shape[0]
-        d_out = self.layers[-1].output
+        d_out = np.copy(self.layers[-1].output)
         d_out[np.arange(batch_size), y_batch] -= 1  # dL/dz for softmax (cross-entropy loss)
         d_out /= batch_size  # Average gradients across batch
         return d_out
