@@ -3,9 +3,10 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import classification_report
-from matplotlib import pyplot as plt
-from sklearn.metrics import accuracy_score
-from sklearn.neural_network import MLPClassifier
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.callbacks import EarlyStopping
+from cnn_model import create_cnn_model  # Ensure this matches the function in cnn_model.py
+from training_plot import TrainingPlot  # Import the custom callback
 
 print("Loading training data...")
 train_data = pd.read_csv('data/archive/emnist-balanced-train.csv')
@@ -14,84 +15,41 @@ y = train_data.iloc[:, 0].values
 
 print("Preprocessing training data...")
 X = X / 255.0
-X = X.reshape(X.shape[0], -1)
+X = X.reshape(-1, 28, 28, 1)  # Reshape for CNN input
 
 print("Splitting data into training and validation sets...")
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
 print("Standardizing features...")
 scaler = MinMaxScaler()
-X_train = scaler.fit_transform(X_train)
-X_val = scaler.transform(X_val)
+X_train = scaler.fit_transform(X_train.reshape(X_train.shape[0], -1)).reshape(-1, 28, 28, 1)
+X_val = scaler.transform(X_val.reshape(X_val.shape[0], -1)).reshape(-1, 28, 28, 1)
 
-hyperparameters = {
-    'hidden_layer_sizes': (128, 64),  # Reduced complexity
-    'activation': 'logistic',
-    'solver': 'adam',
-    'learning_rate_init': 0.01,
-    'max_iter': 1,  # Set to 1 for manual epoch control
-    'random_state': 53,
-    'verbose': True
-}
+print("Converting labels to categorical format...")
+y_train = to_categorical(y_train, num_classes=47)
+y_val = to_categorical(y_val, num_classes=47)
 
-mlp = MLPClassifier(**hyperparameters)
-epochs = 50  # Define the number of epochs
-early_stopping_threshold = 5  # Stop if validation accuracy doesn't improve for 5 epochs
+print("Creating the CNN model...")
+cnn = create_cnn_model(input_shape=(28, 28, 1), num_classes=47)
 
-print("Creating and tuning the model...")
+print("Setting up callbacks...")
+training_plot = TrainingPlot(output_path="training_plot.png")
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-accuracy_history = []
-val_accuracy_history = []
-no_improvement_epochs = 0
-best_val_accuracy = 0
-
-for epoch in range(epochs):
-    print(f"Epoch {epoch + 1}/{epochs}")
-    mlp.partial_fit(X_train, y_train, classes=np.unique(y_train))  # Use partial_fit for incremental learning
-    
-    # Training accuracy
-    y_train_pred = mlp.predict(X_train)
-    train_accuracy = accuracy_score(y_train, y_train_pred)
-    accuracy_history.append(train_accuracy)
-    print(f"Training Accuracy: {train_accuracy:.4f}")
-    
-    # Validation accuracy
-    y_val_pred = mlp.predict(X_val)
-    val_accuracy = accuracy_score(y_val, y_val_pred)
-    val_accuracy_history.append(val_accuracy)
-    print(f"Validation Accuracy: {val_accuracy:.4f}")
-    
-    # Early stopping
-    if val_accuracy > best_val_accuracy:
-        best_val_accuracy = val_accuracy
-        no_improvement_epochs = 0
-    else:
-        no_improvement_epochs += 1
-        if no_improvement_epochs >= early_stopping_threshold:
-            print("Early stopping triggered.")
-            break
-
-# Save the accuracy history for plotting
-np.save('accuracy_history.npy', accuracy_history)
-np.save('val_accuracy_history.npy', val_accuracy_history)
+print("Training the CNN model...")
+cnn.fit(
+    X_train, y_train,
+    validation_data=(X_val, y_val),
+    epochs=6,
+    batch_size=128,
+    callbacks=[training_plot, early_stopping]  # Add the TrainingPlot callback
+)
 
 print("Evaluating the model on validation data...")
-y_pred = mlp.predict(X_val)
-print(classification_report(y_val, y_pred))
+val_loss, val_accuracy = cnn.evaluate(X_val, y_val)
+print(f"Validation Accuracy: {val_accuracy:.2f}")
 
-print("Plotting training and validation accuracy...")
-plt.figure(figsize=(10, 6))
-plt.plot(accuracy_history, label='Training Accuracy')
-plt.plot(val_accuracy_history, label='Validation Accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.title('Training and Validation Accuracy Over Epochs')
-plt.legend()
-plt.grid(True)
-plt.savefig('accuracy_plot.png')  # Save the plot as an image
-plt.show()
-
-print("Saving the trained model and scaler...")
+print("Saving the trained CNN model and scaler...")
 import joblib
-joblib.dump(mlp, 'trained_model.pkl')
-joblib.dump(scaler, 'MLP_scaler.pkl')
+cnn.save('trained_cnn_model.keras')  # Updated to use the .keras format
+joblib.dump(scaler, 'cnn_scaler.pkl')
