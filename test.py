@@ -1,23 +1,33 @@
+import pandas as pd
 import numpy as np
-from model import CNN
-from emnist import extract_test_samples
+from sklearn.metrics import accuracy_score, classification_report
+import joblib
+from sklearn.utils import resample
 
-def compute_accuracy(predictions, labels):
-    return np.mean(np.argmax(predictions, axis=1) == labels)
+print("Loading test data...")
+test_data = pd.read_csv('data/archive/emnist-balanced-test.csv')
+X_test = test_data.iloc[:, 1:].values
+y_test = test_data.iloc[:, 0].values
 
-def test(model, X_test, y_test):
-    predictions = model.forward(X_test)
-    accuracy = compute_accuracy(predictions, y_test)
-    print(f"Test Accuracy: {accuracy:.4f}")
+print("Preprocessing test data...")
+X_test = X_test / 255.0
+X_test = X_test.reshape(X_test.shape[0], -1)
 
-if __name__ == "__main__":
-    X_test, y_test = extract_test_samples()
-    X_test = X_test / 255.0  # Normalize pixel values
-    X_test = X_test.reshape(-1, 1, 28, 28)  # Reshape for CNN input
-    
-    conv_config = [(8, 3), (16, 3)]  # Same architecture as training
-    fc_sizes = [128]
-    model = CNN(input_shape=(1, 28, 28), conv_config=conv_config, fc_sizes=fc_sizes, num_classes=47)
-    
-    test(model, X_test, y_test)
+print("Loading the trained model and scaler...")
+mlp = joblib.load('trained_model.pkl')
+scaler = joblib.load('MLP_scaler.pkl')
+X_test = scaler.transform(X_test)
 
+print("Evaluating the model on test data with bootstrapping...")
+n_iterations = 10  # Number of bootstrap samples
+bootstrap_accuracies = []
+
+for i in range(n_iterations):
+    print(f"Bootstrap iteration {i + 1}/{n_iterations}...")
+    X_bootstrap, y_bootstrap = resample(X_test, y_test, replace=True, random_state=53 + i)
+    y_pred = mlp.predict(X_bootstrap)
+    accuracy = accuracy_score(y_bootstrap, y_pred)
+    bootstrap_accuracies.append(accuracy)
+
+average_accuracy = np.mean(bootstrap_accuracies)
+print(f"Average Test Accuracy (Bootstrap): {average_accuracy:.2f}")

@@ -1,58 +1,97 @@
-import argparse
+import pandas as pd
 import numpy as np
-from model import CNN
-from emnist import extract_training_samples
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import classification_report
+from matplotlib import pyplot as plt
+from sklearn.metrics import accuracy_score
+from sklearn.neural_network import MLPClassifier
 
-def cross_entropy_loss(predictions, labels):
-    batch_size = predictions.shape[0]
-    epsilon = 1e-8 # to avoid log(0) 
-    return -np.sum(np.log(predictions[np.arange(batch_size), labels] + epsilon)) / batch_size
+print("Loading training data...")
+train_data = pd.read_csv('data/archive/emnist-balanced-train.csv')
+X = train_data.iloc[:, 1:].values
+y = train_data.iloc[:, 0].values
 
-def compute_accuracy(predictions, labels):
-    return np.mean(np.argmax(predictions, axis=1) == labels)
+print("Preprocessing training data...")
+X = X / 255.0
+X = X.reshape(X.shape[0], -1)
 
-def train(model, X_train, y_train, epochs=10, learning_rate=0.05, batch_size=32):
-    num_samples = X_train.shape[0]
-    for epoch in range(epochs):
-        indices = np.random.permutation(num_samples)
-        X_train, y_train = X_train[indices], y_train[indices]
-        
-        for i in range(0, num_samples, batch_size):
-            X_batch = X_train[i:i+batch_size]
-            y_batch = y_train[i:i+batch_size]
-            
-            predictions = model.forward(X_batch)
-            loss = cross_entropy_loss(predictions, y_batch)
-            acc = compute_accuracy(predictions, y_batch)
-            
-            # Backpropagation
-            model.backward(X_batch, y_batch)
-            
-            model.update_weights(learning_rate)
+print("Splitting data into training and validation sets...")
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
+print("Standardizing features...")
+scaler = MinMaxScaler()
+X_train = scaler.fit_transform(X_train)
+X_val = scaler.transform(X_val)
 
-            print(f"Epoch {epoch+1}, Batch {i//batch_size+1}: Loss={loss:.4f}, Accuracy={acc:.4f}")
-            
+hyperparameters = {
+    'hidden_layer_sizes': (128, 64),  # Reduced complexity
+    'activation': 'logistic',
+    'solver': 'adam',
+    'learning_rate_init': 0.01,
+    'max_iter': 1,  # Set to 1 for manual epoch control
+    'random_state': 53,
+    'verbose': True
+}
 
-if __name__ == "__main__":
-    # Set up command-line argument parsing
-    parser = argparse.ArgumentParser(description="Train a CNN on the EMNIST dataset.")
-    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate for training')
+mlp = MLPClassifier(**hyperparameters)
+epochs = 50  # Define the number of epochs
+early_stopping_threshold = 5  # Stop if validation accuracy doesn't improve for 5 epochs
+
+print("Creating and tuning the model...")
+
+accuracy_history = []
+val_accuracy_history = []
+no_improvement_epochs = 0
+best_val_accuracy = 0
+
+for epoch in range(epochs):
+    print(f"Epoch {epoch + 1}/{epochs}")
+    mlp.partial_fit(X_train, y_train, classes=np.unique(y_train))  # Use partial_fit for incremental learning
     
-    args = parser.parse_args()
+    # Training accuracy
+    y_train_pred = mlp.predict(X_train)
+    train_accuracy = accuracy_score(y_train, y_train_pred)
+    accuracy_history.append(train_accuracy)
+    print(f"Training Accuracy: {train_accuracy:.4f}")
+    
+    # Validation accuracy
+    y_val_pred = mlp.predict(X_val)
+    val_accuracy = accuracy_score(y_val, y_val_pred)
+    val_accuracy_history.append(val_accuracy)
+    print(f"Validation Accuracy: {val_accuracy:.4f}")
+    
+    # Early stopping
+    if val_accuracy > best_val_accuracy:
+        best_val_accuracy = val_accuracy
+        no_improvement_epochs = 0
+    else:
+        no_improvement_epochs += 1
+        if no_improvement_epochs >= early_stopping_threshold:
+            print("Early stopping triggered.")
+            break
 
-    # Load training data
-    X_train, y_train = extract_training_samples()
-    X_train = X_train / 255.0  # Normalize pixel values
-    X_train = X_train.reshape(-1, 1, 28, 28)  # Reshape for CNN input
+# Save the accuracy history for plotting
+np.save('accuracy_history.npy', accuracy_history)
+np.save('val_accuracy_history.npy', val_accuracy_history)
 
-    # Define the model configuration
-    conv_config = [(8, 3), (16, 3)]  # Two convolutional layers
-    fc_sizes = [128]  # One hidden FC layer
-    model = CNN(input_shape=(1, 28, 28), conv_config=conv_config, fc_sizes=fc_sizes, num_classes=47)
+print("Evaluating the model on validation data...")
+y_pred = mlp.predict(X_val)
+print(classification_report(y_val, y_pred))
 
-    # Train the model with parameters from the command line
-    train(model, X_train, y_train, epochs=args.epochs, learning_rate=args.learning_rate, batch_size=args.batch_size)
+print("Plotting training and validation accuracy...")
+plt.figure(figsize=(10, 6))
+plt.plot(accuracy_history, label='Training Accuracy')
+plt.plot(val_accuracy_history, label='Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.title('Training and Validation Accuracy Over Epochs')
+plt.legend()
+plt.grid(True)
+plt.savefig('accuracy_plot.png')  # Save the plot as an image
+plt.show()
 
+print("Saving the trained model and scaler...")
+import joblib
+joblib.dump(mlp, 'trained_model.pkl')
+joblib.dump(scaler, 'MLP_scaler.pkl')
