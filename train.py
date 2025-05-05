@@ -53,3 +53,5 @@ print("Saving the trained CNN model and scaler...")
 import joblib
 cnn.save('trained_cnn_model.keras')  # Updated to use the .keras format
 joblib.dump(scaler, 'cnn_scaler.pkl')
+
+
