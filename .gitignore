@@ -1,1 +1,3 @@
 emnist*
+__pycache__
+*.png
