@@ -23,6 +23,10 @@ print("Evaluating the model on test data with bootstrapping...")
 n_iterations = 10  # Number of bootstrap samples
 bootstrap_accuracies = []
 
+import time
+# Start measuring CPU time
+start_cpu = time.process_time()
+
 for i in range(n_iterations):
     print(f"Bootstrap iteration {i + 1}/{n_iterations}...")
     X_bootstrap, y_bootstrap = resample(X_test, y_test, replace=True, random_state=53 + i)
@@ -33,3 +37,8 @@ for i in range(n_iterations):
 
 average_accuracy = np.mean(bootstrap_accuracies)
 print(f"Average Test Accuracy (Bootstrap): {average_accuracy:.2f}")
+
+# End measuring CPU time
+end_cpu = time.process_time()
+
+print(f"CPU time used: {end_cpu - start_cpu:.4f} seconds")
